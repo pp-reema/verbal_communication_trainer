@@ -1,0 +1,38 @@
+{
+    "storytelling": [
+        "Tell a story about a challenge you overcame.",
+        "Describe a time when you helped someone in need.",
+        "Imagine a futuristic world and narrate a short story.",
+        "Tell a story about a childhood memory that shaped you.",
+        "Share an experience where you had to make a difficult choice.",
+        "Narrate a funny or embarrassing moment and what you learned from it.",
+        "Describe a time when a stranger impacted your life in an unexpected way.",
+        "Tell a story about a travel experience that changed your perspective.",
+        "Recount a time when you faced failure and how it helped you grow.",
+        "Share a moment when you discovered something new about yourself."
+    ],
+    "impromptu_speaking": [
+        "If you could invent a new technology, what would it be?",
+        "Describe a moment that changed your life.",
+        "What advice would you give to your younger self?",
+        "If you could live in any historical period, which one and why?",
+        "If you could have dinner with any historical figure, who would it be and why?",
+        "What is one thing you would change about the world and why?",
+        "If you won a million dollars today, what would you do with it?",
+        "What is the most important skill for success in the modern world?",
+        "Describe a book or movie that had a significant impact on you.",
+        "If you had to teach a class on any subject, what would it be and why?"
+    ],
+    "conflict_resolution": [
+        "A coworker takes credit for your work. How do you handle it?",
+        "You have a disagreement with your manager. How do you resolve it?",
+        "A team member is not contributing to a group project. What do you do?",
+        "You need to deliver bad news to a client. How do you approach it?",
+        "A customer is unhappy with your service. How do you handle the situation?",
+        "You have a conflict with a close friend over a misunderstanding. How do you fix it?",
+        "Two team members are in a heated argument during a meeting. How do you mediate?",
+        "You are negotiating a deal, but the other party is being unreasonable. What is your approach?",
+        "A family member disagrees with your life choices. How do you communicate effectively?",
+        "A colleague keeps interrupting you during meetings. How do you address it professionally?"
+    ]
+}
