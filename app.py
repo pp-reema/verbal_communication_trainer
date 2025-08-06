@@ -1,35 +1,18 @@
-# Install dependencies
-!pip install  bitsandbytes accelerate gradio openai-whisper
 
-# Import necessary libraries
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+import os
+import json
+import random
 import torch
 import gradio as gr
+from datetime import datetime
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 import whisper
-import functools
 
-#Load Falcon-7B-Instruct with 4-bit Quantization
-model_name = "tiiuae/falcon-7b-instruct"
+# Global variables
+chat_history = []
+PROGRESS_FILE = "progress.json"
 
-quant_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_compute_dtype=torch.float16
-)
-
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-device = "cuda" if torch.cuda.is_available() else "cpu"
-
-model = AutoModelForCausalLM.from_pretrained(
-    model_name,
-    quantization_config=quant_config,
-    device_map=device
-)
-
-print("Falcon-7B-Instruct Loaded Successfully on:", device)
-
-import json
-
-# Define the training prompts
+# Training data
 training_data = {
     "storytelling": [
         "Tell a story about a challenge you overcame.",
@@ -69,741 +52,343 @@ training_data = {
     ]
 }
 
-#  Save it to a JSON file
-with open("training_prompts.json", "w") as f:
-    json.dump(training_data, f, indent=4)
-
-print("✅ training_prompts.json file updated successfully!")
-
-import os
-
-def load_training_prompts():
-    """Load predefined training prompts from JSON."""
-    if not os.path.exists("training_prompts.json"):
-        print("⚠️ training_prompts.json not found! Creating a default file...")
-        # Auto-create the file if missing
-        with open("training_prompts.json", "w") as f:
-            json.dump(training_data, f)
-
-    with open("training_prompts.json", "r") as f:
-        return json.load(f)
-
-#  Load the training data
-training_data = load_training_prompts()
-
-# ✅ Load Whisper Model for Speech-to-Text
-whisper_model = whisper.load_model("small")
-
-#  AI Functions
-chat_history = []
-
-def chat_with_ai(input_type, user_input, audio_input):
-    """Handles user choice for text or voice input and returns only the last AI response"""
-    if input_type == "Voice":
-        if audio_input is None:
-            return "❌ No audio file provided. Please record your voice."
-        user_input = transcribe_audio(audio_input)  # Convert speech to text
-
-    chat_history.append(f"User: {user_input}")
-
-    # Limit history to last 10 exchanges to prevent excessive context length
-    if len(chat_history) > 10:
-        chat_history.pop(0)
-
-    prompt = f"User: {user_input}\nAssistant:"
-
-    inputs = tokenizer(prompt, return_tensors="pt").to(device)
-    output = model.generate(**inputs, max_new_tokens=200, temperature=0.9, top_p=0.95)
-
-    response = tokenizer.decode(output[0], skip_special_tokens=True)
-
-    chat_history.append(f"Assistant: {response}")  # Store AI response in history
-
-    return response  # Only returning the latest response, no full history
-
-def load_training_prompts():
-    """Load predefined training prompts from JSON."""
-    with open("training_prompts.json", "r") as f:
-        return json.load(f)
-
-training_data = load_training_prompts()
-
-import json
-import random
-
-def storytelling_prompt():
-    """Pick a random storytelling prompt."""
-    return random.choice(training_data["storytelling"])
-
-def evaluate_story(user_text):
-    """Evaluate storytelling quality with scoring and force critical feedback."""
-
-    if not user_text or len(user_text.split()) < 5:
-        return "❌ This input is too short to be a story. Please provide a complete story."
-
-    prompt = f"""
-You are a **professional storytelling coach and literary critic**. Your task is to analyze and critique the following story with a **critical eye**.
-**If the input is meaningless, incomplete, or gibberish, call it out immediately!**
-If the story lacks structure or creativity, **point it out clearly and explain why.**
-
-### **📌 Evaluation Criteria (Score 1-10)**
-1️⃣ **Story Structure:**
-   - Does the story have a clear **beginning, middle, and end**?
-   - Are transitions smooth, or does it feel disjointed?
-
-2️⃣ **Emotional Engagement:**
-   - Does the story make the reader **feel** something? (Joy, sadness, excitement, suspense)
-   - Are the characters and events **relatable & immersive**?
-
-3️⃣ **Creativity & Originality:**
-   - Does it introduce **unique ideas or perspectives**?
-   - Does it avoid clichés and predictable storylines?
-
-4️⃣ **Clarity & Flow:**
-   - Is the writing **coherent and easy to follow**?
-   - Is the pacing **appropriate** (not too rushed or too slow)?
-
-### **🔥 Scoring Format:**
-- **Story Structure:** X/10
-- **Emotional Engagement:** X/10
-- **Creativity & Originality:** X/10
-- **Clarity & Flow:** X/10
-
----
-
-### **⚠️ Important: Call Out Bad Writing!**
-- If the story is **gibberish, unstructured, or makes no sense**, **say so directly.**
-- If it is **too generic**, **explain why it lacks originality.**
-- Do **NOT** give high scores unless the story genuinely deserves them.
-
----
-
-### **💡 Actionable Improvement Tips:**
-✅ Provide **3-5 specific, non-generic ways** to make the story better.
-
----
-
-📖 **Story to Evaluate:**
-{user_text}
-
-🎯 **Now, provide your honest, detailed critique.**
-"""
-
-    response = generate_response(prompt)
-    return response.split("Assistant:")[-1].strip()
-
-def generate_response(user_input):
-    """Generates AI response with optimized parameters for speed and accuracy."""
-
-    formatted_input = f"User: {user_input}\nAssistant:"
-    inputs = tokenizer(formatted_input, return_tensors="pt").to(device)
-
-    # Generate output with optimized settings
-    output = model.generate(
-        **inputs,
-        max_new_tokens=200,  # Reduced token limit for faster processing
-        temperature=0.9,  # More balanced randomness
-        top_p=0.9  # More controlled probability selection
-    )
-
-    # Decode response
-    response = tokenizer.decode(output[0], skip_special_tokens=True).strip()
-
-    # **Fix: Remove unwanted prompt repetition**
-    if "Assistant:" in response:
-        response = response.split("Assistant:")[-1].strip()
-
-    return response
-
-import re
-import random
-
-
-def impromptu_speaking():
-    """Pick a random topic for impromptu speaking."""
-    return random.choice(training_data["impromptu_speaking"])
-
-def evaluate_speech(user_text):
-    """Evaluate impromptu speech with critical feedback and topic relevance checking."""
-
-    if not user_text or len(user_text.split()) < 5:
-        return "❌ This response is too short to be a valid speech. Please provide a complete response."
-
-
-    # **Step 2: Detailed Speech Evaluation**
-    prompt = f"""
-You are a **professional speech coach and public speaking expert**.
-Your job is to analyze and **critique this speech thoroughly** with a **critical eye**.
-**If the speech lacks relevance, structure, or confidence, point it out clearly.**
-
-### **📌 Evaluation Criteria (Score 1-10 per category)**
-1️⃣ **Relevance to Topic:**
-   - Does the speech **directly** address the given topic?
-   - Is the content **on-topic** or does it drift off?
-
-2️⃣ **Clarity & Structure:**
-   - Does it have a **clear introduction, body, and conclusion**?
-   - Are transitions **smooth and logical**, or does it feel disjointed?
-
-3️⃣ **Engagement & Persuasion:**
-   - Does the speaker **capture the audience’s attention**?
-   - Are rhetorical devices (stories, examples, humor) used effectively?
-
-4️⃣ **Pacing & Confidence:**
-   - Does the speaker sound **confident and natural**?
-   - Is the **pacing appropriate** (not too rushed or too slow)?
-   - Are there **too many filler words** ("um", "uh", "you know")?
-
-### **🔥 Scoring Format:**
-- **Relevance to Topic:** X/10
-- **Clarity & Structure:** X/10
-- **Engagement & Persuasion:** X/10
-- **Pacing & Confidence:** X/10
-
----
-
-### **⚠️ Important: Call Out Weak Responses!**
-- If the response is **off-topic**, **say so directly.**
-- If it is **unclear or lacks depth**, **explain why and how to fix it.**
-- **Do NOT give high scores unless truly deserved.**
-
----
-
-### **💡 Actionable Improvement Tips:**
-✅ Provide **3-5 specific, non-generic ways** to improve the speech.
-
----
-
-🎙 **User’s Speech:** {user_text}
-
-🎯 **Now, provide your honest, detailed critique.**
-"""
-
-    response = generate_response(prompt)
-    return response.strip()
-
-def conflict_resolution_scenario():
-    """Pick a random conflict resolution scenario."""
-    return random.choice(training_data["conflict_resolution"])
-
-def assess_conflict_response(user_text):
-    """Critically analyze conflict resolution response and ensure honest, structured feedback."""
-
-    if not user_text or len(user_text.split()) < 5:
-        return "❌ This input is too short to assess. Please provide a full response."
-
-    prompt = f"""
-You are a **professional conflict resolution coach and negotiation expert**.
-Your task is to **analyze this response critically** and **highlight both strengths & flaws**.
-Do **NOT** be overly positive—**if the response is weak, say so directly!**
-
-### **📌 Evaluation Criteria (Score 1-10 per category)**
-1️⃣ **Empathy & Understanding:**
-   - Does the response show genuine **concern for others' emotions**?
-   - Does it acknowledge the other person's **perspective & feelings**?
-
-2️⃣ **Diplomacy & Professionalism:**
-   - Is the response **calm, professional, and respectful**?
-   - Does it avoid **aggression, defensiveness, or passive-aggressiveness**?
-
-3️⃣ **Effectiveness of Resolution:**
-   - Does the response **actually solve the conflict**?
-   - Does it suggest a **reasonable compromise or constructive solution**?
-
-### **🔥 Scoring Format:**
-- **Empathy & Understanding:** X/10
-- **Diplomacy & Professionalism:** X/10
-- **Effectiveness of Resolution:** X/10
-
----
-
-### **⚠️ Important: Call Out Weak Responses!**
-❌ If the response lacks empathy, **explain why**.
-❌ If it's aggressive, vague, or dismissive, **highlight it clearly**.
-❌ If it doesn't resolve the conflict, **suggest a better approach**.
-
----
-
-### **💡 Actionable Improvement Tips:**
-✅ Provide **3-5 clear, specific ways** to improve the response.
-✅ Avoid generic feedback—**make it personal & precise**.
-
----
-
-🤝 **User’s Conflict Resolution Response:**
-{user_text}
-
-🎯 **Now, provide your honest, structured critique.**
-"""
-
-    response = generate_response(prompt)
-    return response.split("Assistant:")[-1].strip()
+def initialize_models():
+    """Initialize AI models with error handling"""
+    try:
+        # Load Falcon-7B-Instruct with 4-bit Quantization
+        model_name = "tiiuae/falcon-7b-instruct"
+        
+        quant_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16
+        )
+        
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+            
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            quantization_config=quant_config if device == "cuda" else None,
+            device_map="auto" if device == "cuda" else None,
+            torch_dtype=torch.float16 if device == "cuda" else torch.float32
+        )
+        
+        # Load Whisper model
+        whisper_model = whisper.load_model("small")
+        
+        print(f"✅ Models loaded successfully on: {device}")
+        return model, tokenizer, whisper_model, device
+        
+    except Exception as e:
+        print(f"❌ Error loading models: {e}")
+        return None, None, None, "cpu"
+
+# Initialize models
+model, tokenizer, whisper_model, device = initialize_models()
 
 def transcribe_audio(audio_file):
     """Convert speech to text"""
-    result = whisper_model.transcribe(audio_file)
-    return result["text"]
-
-def assess_presentation(user_text):
-    """AI strictly analyzes speech and provides HONEST, CRITICAL feedback with actual scores."""
-
-    if not user_text:
-        return "❌ Please enter or record a speech before submitting."
-
-        prompt = f"""
-You are a **professional speech coach and public speaking expert**.
-Your job is to analyze and **critique this speech thoroughly** with a **critical eye**.
-**If the speech lacks relevance, structure, or confidence, point it out clearly.**
-
-### **📌 Evaluation Criteria (Score 1-10 per category)**
-1️⃣ **Relevance to Topic:**
-   - Does the speech **directly** address the given topic?
-   - Is the content **on-topic** or does it drift off?
-
-2️⃣ **Clarity & Structure:**
-   - Does it have a **clear introduction, body, and conclusion**?
-   - Are transitions **smooth and logical**, or does it feel disjointed?
-
-3️⃣ **Engagement & Persuasion:**
-   - Does the speaker **capture the audience’s attention**?
-   - Are rhetorical devices (stories, examples, humor) used effectively?
-
-4️⃣ **Pacing & Confidence:**
-   - Does the speaker sound **confident and natural**?
-   - Is the **pacing appropriate** (not too rushed or too slow)?
-   - Are there **too many filler words** ("um", "uh", "you know")?
-
-### **🔥 Scoring Format:**
-- **Relevance to Topic:** X/10
-- **Clarity & Structure:** X/10
-- **Engagement & Persuasion:** X/10
-- **Pacing & Confidence:** X/10
-
----
-
-### **⚠️ Important: Call Out Weak Responses!**
-- If the response is **off-topic**, **say so directly.**
-- If it is **unclear or lacks depth**, **explain why and how to fix it.**
-- **Do NOT give high scores unless truly deserved.**
-
----
-
-### **💡 Actionable Improvement Tips:**
-✅ Provide **3-5 specific, non-generic ways** to improve the speech.
-
----
-
-🎙 **User’s Speech:** {user_text}
-
-🎯 **Now, provide your honest, detailed critique.**
-"""
-
-    response = generate_response(prompt)
-    return response.strip()
-
-def analyze_speech_tone(user_text):
-    """Critically analyzes speech tone and ensures structured, professional feedback."""
-
-    if not user_text or len(user_text.split()) < 5:
-        return "❌ This input is too short to assess. Please provide a full speech."
-
-    prompt = f"""
-You are a **professional speech coach and vocal expert**.
-Your job is to **analyze and critique this speech tone thoroughly** with a **critical eye**.
-**If the speech lacks confidence, vocal variety, or expressiveness, point it out clearly.**
-
-### **📌 Evaluation Criteria (Score 1-10 per category)**
-1️⃣ **Confidence & Presence:**
-   - Does the speaker **sound self-assured or hesitant**?
-   - Do they convey **authority and credibility**?
-
-2️⃣ **Emotional Tone & Expressiveness:**
-   - Is the speech **engaging, passionate, and expressive**?
-   - Does it sound **robotic, flat, or overly dramatic**?
-
-3️⃣ **Intonation & Vocal Variability:**
-   - Does the speaker **change pitch naturally** or stay monotone?
-   - Are key points **emphasized effectively**?
-
-4️⃣ **Filler Words & Hesitation:**
-   - Does the speaker **use too many "um", "uh", or long pauses**?
-   - Do they hesitate or struggle to find words?
-
-### **🔥 Scoring Format:**
-- **Confidence & Presence:** X/10
-- **Emotional Tone & Expressiveness:** X/10
-- **Intonation & Vocal Variability:** X/10
-- **Filler Words & Hesitation:** X/10
-
----
-
-### **⚠️ Important: Call Out Weak Speech Tones!**
-❌ If the speech is **monotone, hesitant, or lacks expressiveness**, **highlight the issue clearly**.
-❌ If there’s **no vocal variation**, AI must call it out as monotonous.
-❌ If **filler words** are excessive, AI must explain their impact on the speech.
-
----
-
-### **💡 Actionable Improvement Tips:**
-✅ Provide **3-5 specific, non-generic ways** to improve tone.
-✅ Avoid vague advice—**make it precise and tailored to the speech**.
-
----
-
-🎤 **User’s Speech:**
-{user_text}
-
-🎯 **Now, provide your structured, detailed critique.**
-"""
-
-
-    response = generate_response(prompt)
-    return response.split("Assistant:")[-1].strip()
-
-import os
-
-def save_feedback(user_text, ai_feedback):
-    """Saves AI feedback into a properly formatted JSON file for progress tracking."""
-
-    file_path = "user_progress.json"
-
-    # Load existing data if the file exists, else start a new list
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, "r") as f:
-                data = json.load(f)  # Load existing JSON data
-        except json.JSONDecodeError:
-            data = []  # If file is corrupted, reset it
-    else:
-        data = []  # Create a new list if file does not exist
-
-    # Append new entry
-    data.append({"speech": user_text, "feedback": ai_feedback})
-
-    # Save back to file in a structured format
-    with open(file_path, "w") as f:
-        json.dump(data, f, indent=4)  # Pretty-print JSON with indentation
-
-    return "✅ Feedback successfully saved!"
-
-from datetime import datetime
-
-# ✅ File to store user progress
-
-PROGRESS_FILE = "progress.json"
-
-def save_feedback(user_text, ai_feedback, topic, scores):
-    """Saves AI feedback, topic, and scores into a JSON file for tracking progress"""
-    data = {
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "topic": topic,
-        "speech": user_text,
-        "scores": scores,  # Dictionary of individual category scores
-        "feedback": ai_feedback
-    }
-
-    # Load existing progress or create a new list
+    if audio_file is None or whisper_model is None:
+        return "❌ No audio file provided or Whisper model not loaded."
+    
     try:
-        with open(PROGRESS_FILE, "r") as f:
-            progress_data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        progress_data = []
+        result = whisper_model.transcribe(audio_file)
+        return result["text"]
+    except Exception as e:
+        return f"❌ Error transcribing audio: {e}"
 
-    # Append new data
-    progress_data.append(data)
+def generate_response(user_input):
+    """Generate AI response with error handling"""
+    if model is None or tokenizer is None:
+        return "❌ AI model not loaded. Please try again later."
+    
+    try:
+        formatted_input = f"User: {user_input}\nAssistant:"
+        inputs = tokenizer(formatted_input, return_tensors="pt", truncation=True, max_length=512).to(device)
+        
+        with torch.no_grad():
+            output = model.generate(
+                **inputs,
+                max_new_tokens=200,
+                temperature=0.9,
+                top_p=0.9,
+                do_sample=True,
+                pad_token_id=tokenizer.eos_token_id
+            )
+        
+        response = tokenizer.decode(output[0], skip_special_tokens=True)
+        
+        if "Assistant:" in response:
+            response = response.split("Assistant:")[-1].strip()
+        
+        return response
+        
+    except Exception as e:
+        return f"❌ Error generating response: {e}"
 
-    # Save back to file
-    with open(PROGRESS_FILE, "w") as f:
-        json.dump(progress_data, f, indent=4)
+def chat_with_ai(input_type, user_input, audio_input):
+    """Handle chat with AI"""
+    if input_type == "Voice":
+        if audio_input is None:
+            return "❌ No audio file provided. Please record your voice."
+        user_input = transcribe_audio(audio_input)
+    
+    if not user_input or user_input.strip() == "":
+        return "❌ Please provide some input."
+    
+    chat_history.append(f"User: {user_input}")
+    
+    if len(chat_history) > 10:
+        chat_history.pop(0)
+    
+    response = generate_response(user_input)
+    chat_history.append(f"Assistant: {response}")
+    
+    return response
 
-    return "✅ Feedback & scores saved for progress tracking!"
+def storytelling_prompt():
+    """Pick a random storytelling prompt"""
+    return random.choice(training_data["storytelling"])
+
+def impromptu_speaking():
+    """Pick a random topic for impromptu speaking"""
+    return random.choice(training_data["impromptu_speaking"])
+
+def conflict_resolution_scenario():
+    """Pick a random conflict resolution scenario"""
+    return random.choice(training_data["conflict_resolution"])
+
+def evaluate_story(user_text):
+    """Evaluate storytelling quality"""
+    if not user_text or len(user_text.split()) < 5:
+        return "❌ This input is too short to be a story. Please provide a complete story."
+    
+    prompt = f"""
+You are a professional storytelling coach. Evaluate this story on:
+1. Story Structure (1-10)
+2. Emotional Engagement (1-10) 
+3. Creativity & Originality (1-10)
+4. Clarity & Flow (1-10)
+
+Story: {user_text}
+
+Provide scores and specific feedback for improvement.
+"""
+    
+    return generate_response(prompt)
+
+def evaluate_speech(user_text):
+    """Evaluate impromptu speech"""
+    if not user_text or len(user_text.split()) < 5:
+        return "❌ This response is too short. Please provide a complete response."
+    
+    prompt = f"""
+You are a professional speech coach. Evaluate this speech on:
+1. Relevance to Topic (1-10)
+2. Clarity & Structure (1-10)
+3. Engagement & Persuasion (1-10)
+4. Pacing & Confidence (1-10)
+
+Speech: {user_text}
+
+Provide scores and specific improvement tips.
+"""
+    
+    return generate_response(prompt)
+
+def assess_conflict_response(user_text):
+    """Assess conflict resolution response"""
+    if not user_text or len(user_text.split()) < 5:
+        return "❌ This input is too short to assess. Please provide a full response."
+    
+    prompt = f"""
+You are a conflict resolution expert. Evaluate this response on:
+1. Empathy & Understanding (1-10)
+2. Diplomacy & Professionalism (1-10)
+3. Effectiveness of Resolution (1-10)
+
+Response: {user_text}
+
+Provide scores and actionable improvement tips.
+"""
+    
+    return generate_response(prompt)
+
+def save_progress_data(user_text, feedback, topic="General"):
+    """Save user progress"""
+    try:
+        data = {
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "topic": topic,
+            "speech": user_text[:200] + "..." if len(user_text) > 200 else user_text,
+            "feedback": feedback[:300] + "..." if len(feedback) > 300 else feedback
+        }
+        
+        if os.path.exists(PROGRESS_FILE):
+            with open(PROGRESS_FILE, "r") as f:
+                progress_data = json.load(f)
+        else:
+            progress_data = []
+        
+        progress_data.append(data)
+        
+        # Keep only last 20 entries
+        if len(progress_data) > 20:
+            progress_data = progress_data[-20:]
+        
+        with open(PROGRESS_FILE, "w") as f:
+            json.dump(progress_data, f, indent=2)
+        
+        return "✅ Progress saved!"
+        
+    except Exception as e:
+        return f"❌ Error saving progress: {e}"
 
 def load_progress():
-    """Loads user progress from JSON and returns formatted results."""
+    """Load user progress"""
     try:
+        if not os.path.exists(PROGRESS_FILE):
+            return "⚠️ No progress data found."
+        
         with open(PROGRESS_FILE, "r") as f:
             progress_data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return "⚠️ No progress data found."
+        
+        if not progress_data:
+            return "⚠️ No past results available."
+        
+        summary = "📊 **Your Recent Performance:**\n\n"
+        for entry in progress_data[-5:]:
+            summary += f"📅 **Date:** {entry['date']}\n"
+            summary += f"📝 **Topic:** {entry['topic']}\n"
+            summary += f"💬 **Speech:** {entry['speech']}\n"
+            summary += f"💡 **Feedback:** {entry['feedback']}\n\n"
+        
+        return summary
+        
+    except Exception as e:
+        return f"❌ Error loading progress: {e}"
 
-    if not progress_data:
-        return "⚠️ No past results available yet."
-
-    progress_summary = "📊 **Your Past Performance:**\n\n"
-
-    for entry in progress_data[-5:]:  # Show last 5 results
-        progress_summary += f"📅 **Date:** {entry['date']}\n"
-        progress_summary += f"📝 **Topic:** {entry['topic']}\n"
-        progress_summary += "🎯 **Scores:**\n"
-        for category, score in entry["scores"].items():
-            progress_summary += f"   - {category}: {score}/10\n"
-        progress_summary += f"💡 **Feedback:** {entry['feedback'][:200]}...\n\n"  # Show a preview
-
-    return progress_summary
-
-def get_best_scores():
-    """Finds the highest score recorded for each evaluation category."""
-    try:
-        with open(PROGRESS_FILE, "r") as f:
-            progress_data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return "⚠️ No progress data available."
-
-    if not progress_data:
-        return "⚠️ No past results available."
-
-    best_scores = {}
-
-    for entry in progress_data:
-        for category, score in entry["scores"].items():
-            if category not in best_scores or score > best_scores[category]:
-                best_scores[category] = score
-
-    best_scores_text = "🏆 **Your Best Scores:**\n"
-    for category, score in best_scores.items():
-        best_scores_text += f"✅ {category}: {score}/10\n"
-
-    return best_scores_text
-
-# ✅ Build Unified Gradio UI with All Features
-
-import gradio as gr
-
-# Custom CSS for a premium look
+# Custom CSS
 custom_css = """
-/* 🎨 General Styling */
-h1, h2 {
-    text-align: center;
-    font-family: 'Poppins', sans-serif;
-    font-size: 2.2em;
-    color: #ffffff;
-    font-weight: bold;
+body { 
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
-p {
-    text-align: center;
-    font-family: 'Poppins', sans-serif;
-    font-size: 1.2em;
-    color: #ffffff;
-}
-
-/* 🌌 Background */
-body {
-    background: linear-gradient(to right, #1e3c72, #2a5298); /* Deep Blue Theme */
-    font-family: 'Poppins', sans-serif;
-    margin: 0;
-    padding: 0;
-}
-
-/* 🔹 Fix Tab Title Colors */
-button[role="tab"] {
-    color: white !important;
-    font-weight: bold;
-    background: rgba(255, 255, 255, 0.1); /* Soft Transparent Background */
-    border-radius: 10px;
-    transition: 0.3s ease-in-out;
-}
-
-button[role="tab"]:hover {
-    background: rgba(255, 255, 255, 0.2);
-}
-
-/* 🚀 Improve Container Visibility */
 .gradio-container {
-    max-width: 900px;
-    margin: auto;
-    padding: 25px;
-    background: rgba(0, 0, 0, 0.85);
-    border-radius: 15px;
-    box-shadow: 0px 0px 25px rgba(255, 255, 255, 0.2);
+    max-width: 1000px !important;
+    margin: 0 auto !important;
+    background: rgba(255, 255, 255, 0.95) !important;
+    border-radius: 20px !important;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.1) !important;
 }
 
-/* 🔘 Button Styling */
-.gr-button {
-    background: linear-gradient(90deg, #ff7e5f, #feb47b); /* Orange-Red Gradient */
+.gr-button-primary {
+    background: linear-gradient(45deg, #667eea, #764ba2) !important;
+    border: none !important;
+    border-radius: 10px !important;
     color: white !important;
-    font-weight: bold;
-    border-radius: 10px;
-    padding: 12px 25px !important;
-    border: none;
-    transition: 0.3s ease-in-out;
+    font-weight: bold !important;
+    transition: all 0.3s ease !important;
 }
 
-.gr-button:hover {
-    background: linear-gradient(90deg, #ff5e62, #ff9966); /* Darker Gradient */
-    transform: scale(1.05);
+.gr-button-primary:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.2) !important;
 }
-
-/* 📢 Improve Input Fields */
-.gr-textbox, .gr-textarea, .gr-audio {
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    color: white;
-    padding: 10px;
-    transition: 0.3s ease-in-out;
-}
-
-.gr-textbox:focus, .gr-textarea:focus {
-    border: 1px solid #ff9966;
-    background: rgba(255, 255, 255, 0.15);
-}
-
-/* 🔉 Audio & File Upload Enhancements */
-.gr-audio {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    padding: 10px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.3);
-}
-
-/* 📁 File Upload Box */
-.gr-file {
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px dashed rgba(255, 255, 255, 0.3);
-    padding: 15px;
-    text-align: center;
-    border-radius: 8px;
-    transition: 0.3s ease-in-out;
-}
-
-.gr-file:hover {
-    border-color: #ff9966;
-    background: rgba(255, 255, 255, 0.15);
-}
-
-/* 🏆 Better Tab Navigation */
-.gradio-tabs {
-    display: flex;
-    justify-content: center;
-    margin-bottom: 15px;
-}
-
-button[role="tab"][aria-selected="true"] {
-    background: #ff9966 !important;
-    color: white !important;
-}
-
 """
 
-with gr.Blocks(css=custom_css) as interface:
+# Build Gradio Interface
+with gr.Blocks(css=custom_css, title="AI Communication Trainer") as interface:
     gr.Markdown("# 🎤 AI Verbal Communication Trainer")
-    gr.Markdown("Improve your speaking skills with real-time AI feedback! 🚀")
-
-    # Main Priority Tabs
-
-    with gr.Tab("Training Activities"):
-        with gr.Accordion("🗣️ Impromptu Speaking",open=False):
-            gr.Markdown("## 🎙️ Impromptu Speaking Practice")
-            impromptu_button = gr.Button("🎲 Generate Topic", variant="secondary")
-            impromptu_topic = gr.Textbox(label="Your Topic", interactive=False)
-
-            input_type = gr.Radio(["Text", "Voice"], label="Input Type", value="Text")
-            impromptu_response = gr.Textbox(label="Enter your speech", placeholder="Type or record your speech...")
-            impromptu_audio = gr.Audio(type="filepath", label="🎙️ Record your speech")
-            impromptu_eval_button = gr.Button("📊 Evaluate Speech", variant="primary")
-            impromptu_feedback = gr.Textbox(label="AI Feedback", interactive=False)
-
-            impromptu_button.click(impromptu_speaking, outputs=impromptu_topic)
-            impromptu_eval_button.click(
-                lambda t, a: evaluate_speech(transcribe_audio(a) if t == "Voice" else t),
-                inputs=[impromptu_response, impromptu_audio],
-                outputs=impromptu_feedback
+    gr.Markdown("### Improve your speaking skills with real-time AI feedback! 🚀")
+    
+    with gr.Tabs():
+        with gr.Tab("🎯 Training Activities"):
+            with gr.Accordion("🎲 Impromptu Speaking", open=True):
+                impromptu_topic_btn = gr.Button("🎲 Generate Topic")
+                impromptu_topic = gr.Textbox(label="Your Topic", interactive=False)
+                
+                impromptu_input_type = gr.Radio(["Text", "Voice"], label="Input Method", value="Text")
+                impromptu_text = gr.Textbox(label="Your Speech", placeholder="Type your response here...")
+                impromptu_audio = gr.Audio(label="🎙️ Record Speech", type="filepath")
+                
+                impromptu_submit = gr.Button("📊 Evaluate Speech", variant="primary")
+                impromptu_feedback = gr.Textbox(label="AI Feedback", interactive=False, lines=8)
+                
+                impromptu_topic_btn.click(impromptu_speaking, outputs=impromptu_topic)
+                impromptu_submit.click(
+                    lambda input_type, text, audio: evaluate_speech(
+                        transcribe_audio(audio) if input_type == "Voice" and audio else text
+                    ),
+                    inputs=[impromptu_input_type, impromptu_text, impromptu_audio],
+                    outputs=impromptu_feedback
+                )
+            
+            with gr.Accordion("📖 Storytelling"):
+                story_topic_btn = gr.Button("📖 Generate Story Prompt")
+                story_topic = gr.Textbox(label="Your Story Prompt", interactive=False)
+                
+                story_input_type = gr.Radio(["Text", "Voice"], label="Input Method", value="Text")
+                story_text = gr.Textbox(label="Your Story", placeholder="Tell your story here...")
+                story_audio = gr.Audio(label="🎙️ Record Story", type="filepath")
+                
+                story_submit = gr.Button("📊 Evaluate Story", variant="primary")
+                story_feedback = gr.Textbox(label="AI Feedback", interactive=False, lines=8)
+                
+                story_topic_btn.click(storytelling_prompt, outputs=story_topic)
+                story_submit.click(
+                    lambda input_type, text, audio: evaluate_story(
+                        transcribe_audio(audio) if input_type == "Voice" and audio else text
+                    ),
+                    inputs=[story_input_type, story_text, story_audio],
+                    outputs=story_feedback
+                )
+            
+            with gr.Accordion("🤝 Conflict Resolution"):
+                conflict_topic_btn = gr.Button("🔥 Generate Scenario")
+                conflict_topic = gr.Textbox(label="Your Scenario", interactive=False)
+                
+                conflict_input_type = gr.Radio(["Text", "Voice"], label="Input Method", value="Text")
+                conflict_text = gr.Textbox(label="Your Response", placeholder="How would you handle this?")
+                conflict_audio = gr.Audio(label="🎙️ Record Response", type="filepath")
+                
+                conflict_submit = gr.Button("📊 Evaluate Response", variant="primary")
+                conflict_feedback = gr.Textbox(label="AI Feedback", interactive=False, lines=8)
+                
+                conflict_topic_btn.click(conflict_resolution_scenario, outputs=conflict_topic)
+                conflict_submit.click(
+                    lambda input_type, text, audio: assess_conflict_response(
+                        transcribe_audio(audio) if input_type == "Voice" and audio else text
+                    ),
+                    inputs=[conflict_input_type, conflict_text, conflict_audio],
+                    outputs=conflict_feedback
+                )
+        
+        with gr.Tab("💬 Chat with AI"):
+            chat_input_type = gr.Radio(["Text", "Voice"], label="Input Method", value="Text")
+            chat_text = gr.Textbox(label="Message", placeholder="Type your message...")
+            chat_audio = gr.Audio(label="🎙️ Record Message", type="filepath")
+            
+            chat_submit = gr.Button("💬 Send", variant="primary")
+            chat_output = gr.Textbox(label="AI Response", interactive=False, lines=6)
+            
+            chat_submit.click(
+                chat_with_ai,
+                inputs=[chat_input_type, chat_text, chat_audio],
+                outputs=chat_output
             )
+        
+        with gr.Tab("📈 Progress"):
+            gr.Markdown("## 📊 Track Your Improvement")
+            
+            progress_btn = gr.Button("📂 Load Progress")
+            progress_output = gr.Textbox(label="Your Progress", interactive=False, lines=10)
+            
+            progress_btn.click(load_progress, outputs=progress_output)
 
-        with gr.Accordion("📖 Storytelling",open=False):
-            gr.Markdown("## 📚 Storytelling Practice")
-            story_button = gr.Button("📖 Generate Story Prompt", variant="secondary")
-            story_topic = gr.Textbox(label="Your Story Topic", interactive=False)
-
-            input_type = gr.Radio(["Text", "Voice"], label="Input Type", value="Text")
-            story_response = gr.Textbox(label="Enter your story", placeholder="Type or record your story...")
-            story_audio = gr.Audio(type="filepath", label="🎙️ Record your story")
-            story_eval_button = gr.Button("📊 Evaluate Story", variant="primary")
-            story_feedback = gr.Textbox(label="AI Feedback", interactive=False)
-
-            story_button.click(storytelling_prompt, outputs=story_topic)
-            story_eval_button.click(
-                lambda t, a: evaluate_story(transcribe_audio(a) if t == "Voice" else t),
-                inputs=[story_response, story_audio],
-                outputs=story_feedback
-            )
-
-        with gr.Accordion("🤝 Conflict Resolution",open=False):
-            gr.Markdown("## 🔥 Conflict Resolution Training")
-            conflict_button = gr.Button("📝 Generate Scenario", variant="secondary")
-            conflict_topic = gr.Textbox(label="Your Scenario", interactive=False)
-
-            input_type = gr.Radio(["Text", "Voice"], label="Input Type", value="Text")
-            conflict_response = gr.Textbox(label="Enter your response", placeholder="Type or record your response...")
-            conflict_audio = gr.Audio(type="filepath", label="🎙️ Record your response")
-            conflict_eval_button = gr.Button("📊 Evaluate Response", variant="primary")
-            conflict_feedback = gr.Textbox(label="AI Feedback", interactive=False)
-
-            conflict_button.click(conflict_resolution_scenario, outputs=conflict_topic)
-            conflict_eval_button.click(
-                lambda t, a: assess_conflict_response(transcribe_audio(a) if t == "Voice" else t),
-                inputs=[conflict_response, conflict_audio],
-                outputs=conflict_feedback
-            )
-
-
-
-
-    # Less Priority Tabs (Inside "More" Menu)
-    with gr.Tab("Extra activities"):
-        with gr.Accordion("💬 Chat with AI", open=False):
-            gr.Markdown("## 🗣️ Speak with AI")
-            input_type = gr.Radio(["Text", "Voice"], label="Input Type", value="Text")
-            text_input = gr.Textbox(label="Enter text here", placeholder="Type your message...")
-            audio_input = gr.Audio(type="filepath", label="🎙️ Record your voice")
-            submit_button = gr.Button("💬 Chat", variant="primary")
-            output_box = gr.Textbox(label="Response", interactive=False)
-
-            submit_button.click(chat_with_ai, inputs=[input_type, text_input, audio_input], outputs=output_box)
-
-        with gr.Accordion("📢 Speech Analysis", open=False):
-            gr.Markdown("## 🎤 AI Speech Feedback")
-            input_type = gr.Radio(["Text", "Voice"], label="Input Type", value="Text")
-            speech_input = gr.Textbox(label="Paste your speech", placeholder="Type or record your speech...")
-            speech_audio = gr.Audio(type="filepath", label="🎙️ Record your speech")
-            analyze_button = gr.Button("📊 Analyze Speech", variant="primary")
-            speech_output = gr.Textbox(label="AI Feedback", interactive=False)
-
-            analyze_button.click(
-                lambda t, a: assess_presentation(transcribe_audio(a) if t == "Voice" else t),
-                inputs=[speech_input, speech_audio],
-                outputs=speech_output
-            )
-
-        with gr.Accordion("🎭 Speech Tone Analysis", open=False):
-            gr.Markdown("## 🎭 Speech Tone Detection")
-            input_type = gr.Radio(["Text", "Voice"], label="Input Type", value="Text")
-            tone_input = gr.Textbox(label="Paste your speech", placeholder="Type or record your speech...")
-            tone_audio = gr.Audio(type="filepath", label="🎙️ Record your voice")
-            tone_button = gr.Button("📊 Analyze Tone", variant="primary")
-            tone_output = gr.Textbox(label="AI Tone Analysis", interactive=False)
-
-            tone_button.click(
-                lambda t, a: analyze_speech_tone(transcribe_audio(a) if t == "Voice" else t),
-                inputs=[tone_input, tone_audio],
-                outputs=tone_output
-            )
-    with gr.Tab("📈 View Progress"):
-            gr.Markdown("## 📊 Your Progress & Best Scores")
-
-            progress_button = gr.Button("📂 Load My Progress")
-            progress_output = gr.Textbox(label="Your Past Performance", interactive=False)
-
-            best_score_button = gr.Button("🏆 Show Best Scores")
-            best_score_output = gr.Textbox(label="Best Scores", interactive=False)
-
-            progress_button.click(load_progress, outputs=progress_output)
-            best_score_button.click(get_best_scores, outputs=best_score_output)
-
-interface.launch(share=True)
-
+if __name__ == "__main__":
+    interface.launch(share=False)
